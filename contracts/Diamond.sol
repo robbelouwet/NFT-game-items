@@ -9,7 +9,7 @@ contract Diamond is ERC721 {
     }
 
     function mine(string memory challenge) public returns(bytes32) {
-        bytes32 output_hash = sha3(challenge);
+        bytes32 output_hash = keccak256(bytes(challenge));
 
         _mint(msg.sender, 1);
         return output_hash;
