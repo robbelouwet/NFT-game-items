@@ -1,0 +1,36 @@
+## Collectible
+transfer distributor
+toevoegen van tiers
+	met mask 0
+	buffer size 1 -> 3 items toevoegen => bufersize++??
+	mask bestaat al?
+	tier naam bestaat al?
+toevoegen van blueprints aan tiers
+	meer dan buffer kan houden
+	blueprint name bestaat al?
+	2^buffersize-1 < max supply?
+getBlueprintMaxSupply
+	niet bestaande tier
+	niet bestaande blueprint
+getTierItemsCount
+	niet bestaande tier
+mine
+	niks winnen
+	2x zelfde challenge
+	3 commons minen met max supply = 2
+contains_string
+	werkende & niet werkende case
+contains_int
+	werkende & niet-werkende case
+
+## Distributor
+find_present_tier
+	geen tier aanwezig
+	wel een tier aanwezig (expected value)
+which_tier_blueprint
+	3 items => buff size = 2 => max items = 4, test with id 4 
+		-> this should be the 4th item with id 11, this test the modulo
+	bestaande id => expected value
+check_mask
+	correct
+	niet correct

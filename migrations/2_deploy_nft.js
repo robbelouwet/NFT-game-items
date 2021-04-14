@@ -1,5 +1,6 @@
-const Diamond = artifacts.require("Diamond");
+const Collectible = artifacts.require("./Collectible.sol");
+//const Distributor = artifacts.require("./Distributor.sol");
 
-module.exports = function (deployer) {
-	deployer.deploy(Diamond);
+module.exports = async function (deployer) {
+	await deployer.deploy(Collectible);
 };
