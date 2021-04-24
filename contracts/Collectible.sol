@@ -207,16 +207,19 @@ contract Collectible is ERC721 {
     function addTierBlueprint(uint tier_id, uint max_supply, uint supply_buffer_size, string memory name) public isOwner{
         require(tiers[tier_id].id != 0, "Adding BluePrint to nonexistent tier!");
         require(2**supply_buffer_size-1 >= max_supply, "Buffer size too small, it must be able to hold *max_supply* id's");
+        require(contains_string(tiers[tier_id].blueprint_names, name) == false, "A Blueprint with this name already exists in this tier!");
         uint n = tiers[tier_id].item_buffer_size;
         if (2**n-1 <= tier_blueprints[tier_id].length){
             // if we reach the max items that the buffer of this tier can hold, increment buffer size
             tiers[tier_id].item_buffer_size = tiers[tier_id].item_buffer_size + 1;
         }
         ut.ItemBlueprint memory bp = ut.ItemBlueprint(supply_buffer_size, max_supply, name);
+        tiers[tier_id].blueprint_names.push(name);
         tier_blueprints[tier_id].push(bp);
     }
 
     function getBlueprintMaxSupply(uint tier_id, uint blueprint_id) public view returns (uint) {        
+        require(tiers[tier_id].id != 0, "Tier doesn't exist!");
         require(tier_blueprints[tier_id].length > blueprint_id, "Blueprint ID doesn't exist!");
         return tier_blueprints[tier_id][blueprint_id].max_supply;
     }

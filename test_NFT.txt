@@ -8,14 +8,13 @@ x 	mask bestaat al?
 x	tier naam bestaat al?
 toevoegen van blueprints aan tiers
 x	success scenario
-	meer dan buffer kan houden
-	blueprint name bestaat al?
+x	blueprint name bestaat al?
 	2^buffersize-1 < max supply?
 getBlueprintMaxSupply
-	niet bestaande tier
-	niet bestaande blueprint
+x	niet bestaande tier
+x	niet bestaande blueprint
 getTierItemsCount
-	niet bestaande tier
+x	niet bestaande tier
 mine
 x	success common
 x	2x zelfde tier, ander item

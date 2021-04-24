@@ -18,6 +18,7 @@ library CollectibleUtils {
         // in other words, 2^n-1 needs to be smaller than ItemBlueprint[].length of this tier, see mapping tier_blueprints
         uint item_buffer_size; // amount of bits
         string name; // Diamond or smth
+        string[] blueprint_names;
     }
 
     struct ItemBlueprint {

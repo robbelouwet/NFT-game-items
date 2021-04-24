@@ -5,16 +5,17 @@ const Collectible = artifacts.require("./Collectible.sol");
 let tryCatch = require("./exceptions.js").tryCatch;
 let errTypes = require("./exceptions.js").errTypes;
 let eventPresent = require('./parseTransaction').eventPresent
+let getReturnValue = require('./parseTransaction').getReturnValue
 
 require("chai").use(require("chai-as-promised")).should();
 
 /**
  * To test these tests, remove the blocknumber from the keccak256 call when hashing the challenge string in mine()
  */
-contract("Collectible", (accounts) => {
+contract("Collectible", () => {
 	let collectible;
 
-	describe("deployment", async () => {
+	describe("Deployment", async () => {
 		it("collectible deployed successfully", async () => {
 			collectible = await Collectible.deployed();
 			//console.log(collectible);
@@ -26,8 +27,8 @@ contract("Collectible", (accounts) => {
 		});
 	});
 
-	describe("setup tiers and blueprints", async () => {
-		it("adding 3-8 with buffer 3", async () => {
+	describe("Setup tiers and blueprints testdata", async () => {
+		it("Adding 3-8 tiers with buffer 3", async () => {
 			// it's cheaper to store the exponent than to later on calculate expensive log2(x) operations
 			// tier name, mask length, buffer size for blueprint supply
 			await collectible.newTier("normal", 3, 3); //the challenge mask is 2^3-1
@@ -39,13 +40,14 @@ contract("Collectible", (accounts) => {
 			await collectible.newTier("Exotic", 8, 3);
 		});
 
-		it("Add \"normal\" items", async () => {
-			await collectible.addTierBlueprint(3, 3, 5, "Sword"); // tier_id, buffer_size, max_supply, name
+		it("Add \"Normal\" items", async () => {
+			// tier_id, buffer_size, max_supply, name
+			await collectible.addTierBlueprint(3, 3, 5, "Sword");
 			await collectible.addTierBlueprint(3, 3, 5, "Pickaxe");
 			await collectible.addTierBlueprint(3, 3, 5, "Axe");
 		})
 
-		it("Add \"Exotic\" items", async () => {
+		it("Add \"Exotic\" blueprints", async () => {
 			// tier_id, buffer_size, max_supply, name
 			// there can be at most 5 item_id's for each blueprint, so really rare
 			await collectible.addTierBlueprint(8, 3, 5, "Flaming Sword"); 
@@ -54,14 +56,14 @@ contract("Collectible", (accounts) => {
 		})
 	})
 
-	describe("mining", async () => {
+	describe("Mining", async () => {
 
-		it('mine nothing', async () => {
+		it('Mine nothing => challengeFailed', async () => {
 			const _tx = await collectible.mine("a")
 			assert.isTrue(eventPresent("challengeFailed", _tx))
 		})
 
-		it('mine "normal" successfully', async () => {
+		it('Mine a "normal" item => minedSuccessfully', async () => {
 			// appelss outputs a hash ending with a 7, which is the target mask of category 'normal', hence we should win
 			const _tx = await collectible.mine("appelssssssssss");
 			assert.isTrue(eventPresent("minedSuccessfully", _tx))
@@ -69,7 +71,7 @@ contract("Collectible", (accounts) => {
 			//console.log("output_hash: ", output_hash.tx);
 		});
 
-		it('mine "normal" successfully, different challenge', async () => {
+		it('Mine another "normal" item, different challenge => minedSuccessfully', async () => {
 			// we mine the same tier, but a different item (both challenges result in a hash ending with a 7)
 			await collectible.mine("appelsss");
 			const _tx = await collectible.mine("appelss");
@@ -78,13 +80,13 @@ contract("Collectible", (accounts) => {
 			//console.log("output_hash: ", output_hash.tx);
 		});
 
-		it('mine "Exotic" item ', async () => {
+		it('Mine an "Exotic" item => minedSuccessfully', async () => {
 			const _tx = await collectible.mine('aaaaaaaaaaaaaaaaaaaaaa')
 			assert.isTrue(eventPresent("minedSuccessfully", _tx))
 			//console.log(_tx.tx)
 		})
 
-		it("mine same exact item 2 times", async () => {
+		it("Mine same exact item 2 times => challengeFailed", async () => {
 			// "banaa" ends with a 7, so it's a normal tier
 			// mine 2 times the exact same challenge
 			// should result in mining the exact same item_id 2 times (when excluding the blocknumber from the challenge hash)
@@ -95,8 +97,7 @@ contract("Collectible", (accounts) => {
 		});
 	});
 
-	describe("Adding Tiers", async () => {
-		
+	describe("Tiers", async () => {
 
 		it("Adding with mask=0 fails", async () => {
 			await tryCatch(
@@ -105,21 +106,28 @@ contract("Collectible", (accounts) => {
 			);
 		});
 
-		it("adding duplicate tier masks fails", async () => {
+		it("Adding duplicate tier masks fails", async () => {
 			await tryCatch(
 				collectible.newTier("normal", 3, 3),
 				errTypes.revert
 			);
 		});
 
-		it("adding duplicate tier names fails", async () => {
+		it("Adding duplicate tier names fails", async () => {
 			await tryCatch(
 				collectible.newTier("normal", 9, 3),
 				errTypes.revert
 			);
 		});
 
-		it("Tier buffer overflow increments buffer size", async () => {
+		it("Getting tier items count of nonexistent tier", async () => {
+			await tryCatch(collectible.getTierItemsCount(25000), errTypes.revert)
+		})
+	});
+
+	describe("Blueprints", async () => {
+
+		it("Adding more blueprints than tier buffer can hold => buf size ++", async () => {
 			await collectible.newTier("Impossible", 1, 1);
 
 			// now we add 3 items, but this tier's blueprint buffer has a size of 1.
@@ -134,12 +142,27 @@ contract("Collectible", (accounts) => {
 			assert.equal(size, 2);
 		});
 
-		it("Adding blueprints", async () => {
-			await collectible.addTierBlueprint(3, 3, 5, "Sword"); // tier_id, blueprint buffer_size, max_supply, name
-			await collectible.addTierBlueprint(3, 3, 5, "Pickaxe");
-			await collectible.addTierBlueprint(3, 3, 5, "Axe");
+		it("Getting max supply of nonexistent tier fails", async () => {
+			const _tx = await tryCatch(collectible.getBlueprintMaxSupply(25000, 0), errTypes.revert);
+			getReturnValue(_tx)
+		})
+
+		it("Getting max supply of nonexistent blueprint fails", async () => {
+			const _tx = await tryCatch(collectible.getBlueprintMaxSupply(3, 2500), errTypes.revert);
+			getReturnValue(_tx)
+		})
+
+		it("Adding blueprint with buff size overflowing max supply fails", async () => {
+			// tier_id, buffer_size, max_supply, name
+			await tryCatch(collectible.addTierBlueprint(3, 3, 1, "Dagger"), errTypes.revert);
+		})
+
+		it("Adding existing blueprint fails", async () => {
+			await tryCatch(collectible.addTierBlueprint(3, 3, 5, "Sword"), errTypes.revert);
 		});
-	});
+
+
+	})
 
 	
 });
