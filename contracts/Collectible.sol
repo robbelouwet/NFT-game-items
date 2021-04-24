@@ -1,3 +1,5 @@
+/* Copyright (c) 2019 The47 */
+
 //SPDX-License-Identifier: MIT
 pragma solidity >= 0.6.0 <0.8.0;
 
