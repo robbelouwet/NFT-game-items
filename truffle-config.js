@@ -6,7 +6,7 @@ module.exports = {
 		ropsten: {
 			provider: (_) =>
 				new HDWalletProvider(
-					process.env.MNEMONIC,
+					process.env.ROPSTEN_MNEMONIC,
 					`https://ropsten.infura.io/v3/${process.env.INFURA_KEY}`
 					//derivationPath: "m/44'/60'/0'/0/", // = default, maar toon voor learning purposes
 					//addressIndex: 0, // = default, pak het eerste address uit de wallet

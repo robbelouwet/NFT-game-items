@@ -2,7 +2,6 @@
 pragma solidity >= 0.6.0 <0.8.0;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/utils/EnumerableSet.sol";
 import {CollectibleUtils as ut} from "./utils.sol";
 
 contract Collectible is ERC721 {
@@ -15,6 +14,7 @@ contract Collectible is ERC721 {
     // tier_id => Tier
     mapping(uint => ut.Tier) tiers;
     uint[] tier_ids; // [2, 3, ...], means tiers with mask [11, 111, ...]
+    string[] tier_names;
 
     // contains all mined items in circulation.
     // trailing mask bits of the key (item_id) signify the tier
@@ -27,6 +27,7 @@ contract Collectible is ERC721 {
 
     // all parameters necessary to validate ownership of an item id against the owner's provided challenge string etc.
     event minedSuccessfully(address indexed user, string challenge, uint blocknumber, uint tier_blueprints_buffer_size, uint tier_blueprints, uint blueprint_max_supply);
+    event challengeFailed(address indexed user, string message);
 
     modifier isOwner() {
         require(msg.sender == owner);
@@ -49,7 +50,10 @@ contract Collectible is ERC721 {
 
         // detect if we match a tier, and which one
         uint tier_id = find_present_tier(hashed_challenge); // returns mask_bits
-        require(tier_id != 0x0, "Did not crack the challenge");
+        if (tier_id == 0x0) {
+            emit challengeFailed(msg.sender, "Did not crack the challenge with the specified challenge string.");
+            return;
+        }
 
         // we know the tier, now figure out which blueprint they mined
         uint blueprint_id = which_tier_blueprint(hashed_challenge, tier_id);
@@ -57,7 +61,10 @@ contract Collectible is ERC721 {
         // we know which blueprint, now which exact blueprint instance (aka which blueprint instance id) did they mine?
         uint item_id = item_id(hashed_challenge, tier_id, blueprint_id); 
 
-        require(!_exists(item_id), "Token already exists");
+        if (_exists(item_id)) {
+            emit challengeFailed(msg.sender, "Mined successfully, but item already exists.");
+            return;
+        }
 
         mint(tier_id, blueprint_id, item_id, msg.sender);
 
@@ -118,18 +125,22 @@ contract Collectible is ERC721 {
     /**
      * find out if the hash covers one of the tier masks, if so, return the tier name string.
      */
-    function find_present_tier(bytes32 _hash) public view returns (uint){
+    function find_present_tier(bytes32 _hash) public view returns (uint longest_mask){
         uint[] memory mask_exps = getMasks();
+        longest_mask = 0;
         for (uint256 index = 0; index < mask_exps.length; index++) {
             uint mask = 2**mask_exps[index]-1;
             uint offset = 256 - mask_exps[index];
             bytes32 xored = check_mask(_hash, mask, offset);
 
-            if (xored == 0x0) return mask_exps[index];
+            // we don't only want to find a match, we also want the biggest mask that fits
+            if (xored == 0x0 && mask_exps[index] > longest_mask) longest_mask = mask_exps[index];
         }
-        return 0;
     }
 
+    /**
+    This function looks at which blueprint_id is present in the specified hash and tier
+     */
     // remeber, item_id INCLUDES the tier's mask
     function which_tier_blueprint(bytes32 _hash, uint tier) private returns (uint){
         uint size = getTierItemsCount(tier); // returns 0-based length
@@ -177,6 +188,7 @@ contract Collectible is ERC721 {
         require(id >0 && id < 256, "Please specify a number between 0 and 256");
         require(tiers[id].id == 0, "This tier exists and already has a mask.");
         require(contains_int(tier_ids, id) == false, "This is already a known rarity value");
+        require(contains_string(tier_names, tier) == false, "A tier with this name already exists");
 
         ut.Tier memory new_tier;
         new_tier.name = tier;
@@ -185,6 +197,7 @@ contract Collectible is ERC721 {
 
         tiers[id] = new_tier;
         tier_ids.push(id);
+        tier_names.push(tier);
 
         return id;
     }
@@ -194,7 +207,7 @@ contract Collectible is ERC721 {
         require(2**supply_buffer_size-1 >= max_supply, "Buffer size too small, it must be able to hold *max_supply* id's");
         uint n = tiers[tier_id].item_buffer_size;
         if (2**n-1 <= tier_blueprints[tier_id].length){
-            // if we reach the max items that the buffer can hold, increment buffer size
+            // if we reach the max items that the buffer of this tier can hold, increment buffer size
             tiers[tier_id].item_buffer_size = tiers[tier_id].item_buffer_size + 1;
         }
         ut.ItemBlueprint memory bp = ut.ItemBlueprint(supply_buffer_size, max_supply, name);
