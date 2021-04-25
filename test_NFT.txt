@@ -25,15 +25,3 @@ contains_string
 	werkende & niet werkende case
 contains_int
 	werkende & niet-werkende case
-
-## Distributor
-find_present_tier
-	geen tier aanwezig
-	wel een tier aanwezig (expected value)
-which_tier_blueprint
-	3 items => buff size = 2 => max items = 4, test with id 4 
-		-> this should be the 4th item with id 11, this test the modulo
-	bestaande id => expected value
-check_mask
-	correct
-	niet correct

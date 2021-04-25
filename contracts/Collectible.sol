@@ -181,7 +181,7 @@ contract Collectible is ERC721 {
         addTier(tier, exponent, buffer_size);
     }
 
-    function getTierBPBufferSize(uint tier_id) public returns(uint) {
+    function getTierBPBufferSize(uint tier_id) public view returns(uint) {
         require(tier_blueprints[tier_id].length != 0, "Tier doesn't exist!");
         return tiers[tier_id].item_buffer_size;
     }
@@ -224,7 +224,7 @@ contract Collectible is ERC721 {
         return tier_blueprints[tier_id][blueprint_id].max_supply;
     }
 
-    function getTierItemsCount(uint tier_id) public returns (uint){
+    function getTierItemsCount(uint tier_id) public view returns (uint){
         require(tiers[tier_id].id != 0, "This tier doesn't exist!");
         return tier_blueprints[tier_id].length;
     }

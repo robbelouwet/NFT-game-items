@@ -5,9 +5,10 @@ const Collectible = artifacts.require("./Collectible.sol");
 let tryCatch = require("./exceptions.js").tryCatch;
 let errTypes = require("./exceptions.js").errTypes;
 let eventPresent = require('./parseTransaction').eventPresent
-let getReturnValue = require('./parseTransaction').getReturnValue
+let web3 = require('web3')
 
 require("chai").use(require("chai-as-promised")).should();
+
 
 /**
  * To test these tests, remove the blocknumber from the keccak256 call when hashing the challenge string in mine()
@@ -143,13 +144,11 @@ contract("Collectible", () => {
 		});
 
 		it("Getting max supply of nonexistent tier fails", async () => {
-			const _tx = await tryCatch(collectible.getBlueprintMaxSupply(25000, 0), errTypes.revert);
-			getReturnValue(_tx)
+			await tryCatch(collectible.getBlueprintMaxSupply(25000, 0), errTypes.revert);
 		})
 
 		it("Getting max supply of nonexistent blueprint fails", async () => {
-			const _tx = await tryCatch(collectible.getBlueprintMaxSupply(3, 2500), errTypes.revert);
-			getReturnValue(_tx)
+			await tryCatch(collectible.getBlueprintMaxSupply(3, 2500), errTypes.revert);
 		})
 
 		it("Adding blueprint with buff size overflowing max supply fails", async () => {
@@ -160,9 +159,9 @@ contract("Collectible", () => {
 		it("Adding existing blueprint fails", async () => {
 			await tryCatch(collectible.addTierBlueprint(3, 3, 5, "Sword"), errTypes.revert);
 		});
-
-
 	})
 
-	
+	describe('Integration tests', () => {
+		it('Mine & Transfer ')
+	})
 });
