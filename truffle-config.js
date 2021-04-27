@@ -2,6 +2,7 @@ require("dotenv").config();
 const HDWalletProvider = require("@truffle/hdwallet-provider");
 
 module.exports = {
+	contracts_directory: "./contracts/bundle/",
 	networks: {
 		ropsten: {
 			provider: (_) =>

@@ -1,11 +1,12 @@
 const { assert } = require("chai");
 
-const Collectible = artifacts.require("./Collectible.sol");
+const Collectible = artifacts.require("Collectible");
 
 let tryCatch = require("./exceptions.js").tryCatch;
 let errTypes = require("./exceptions.js").errTypes;
 let eventPresent = require('./parseTransaction').eventPresent
-let web3 = require('web3')
+let bundle = require('../bundle').main
+
 
 require("chai").use(require("chai-as-promised")).should();
 
@@ -16,8 +17,14 @@ require("chai").use(require("chai-as-promised")).should();
 contract("Collectible", () => {
 	let collectible;
 
+	describe("Bundling", async () => {
+		it("Bundle root contract successfully", async () => {
+			await bundle()
+		})
+	})
+
 	describe("Deployment", async () => {
-		it("collectible deployed successfully", async () => {
+		it("Bundle deployed successfully", async () => {
 			collectible = await Collectible.deployed();
 			//console.log(collectible);
 			const address = collectible.address;

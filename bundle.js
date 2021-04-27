@@ -1,63 +1,47 @@
-const readline = require('readline')
-const fs = require('fs');
+require('dotenv').config()
+const { merge } = require('sol-merger')
+const fs = require('fs').promises
 
 /**
- * This script replaces import statements with the contents of the imported script recursively
- * This is usefull for having a standalone.sol file including all libraries for uploading to etherscan to verify contract
+ * bundling solidity files is primarily done by the sol-merger
+ * Sol-merger can leave multiple SPDX license statements though.
+ * So this file is to kind of 'postprocess' the sol-merger's output bundle
  */
-async function parseFile(currentFilePath){
-    var fileString = ""
-    const stream = fs.createReadStream(currentFilePath)
-    const rl = readline.createInterface({
-        input: stream,
-        crlfDelay: Infinity
-    });
+const bundle = async (filePath) => {
+  const _bundle = await merge(filePath)
+  const lines = _bundle.split('\n')
 
-    const importRegex = /^import.*"(.*)"/
-    for await (var l of rl) {
-        l = filterLines(l)
-        const match = importRegex.exec(l)
-        if (match) {
-            //console.log('at: ', currentFilePath, 'matching: ', match[1])
-            //console.log('full path of match: ', getPath(currentFilePath, match[1]), '\n')
-            const recursed = await parseFile(getPath(currentFilePath, match[1]))
-            fileString += `${recursed}\n\r`
-        } else {
-            fileString += `${l}\n\r`
+  // When we want to filter lines like SPDX licenses,
+  // we want to remove them all except one (the first)
+  // the first time we encounter, we leave it and set a boolean to true
+  // next time we hit such a line, remove it
+  const occurances = {}
+
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]
+
+    for (let j = 0; j < Object.keys(removeregexes).length; j++) {
+      const key = Object.keys(removeregexes)[j]
+      const match = removeregexes[key].exec(l)
+      if (match) {
+        if (!!occurances[j] === true) {
+          console.log('Found line to ignore: ', l)
+          lines[i] = ''
+          occurances[j] = true
         }
+        occurances[j] = true
+      }
     }
-   return fileString
+  }
+
+  return lines.join('\n')
 }
 
-const getPath = (fp, importst) => {
-    if (importst[0] !== '.') {
-        return `${process.cwd()}/node_modules/${importst}`
-    } else {
-        fp = fp.split('/').slice(0, -1).join('/')
-        return `${fp}/${importst}`
-    }
+const removeregexes = {
+  spdxLicense: /.*SPDX.*/g,
 }
 
-
-const ignoreRegexes = [
-    /^pragma/gm,
-    /.*MIT.*/gm,
-    /.*The47.*/gm]
-
-const filterLines = (l) => {
-    for (var i = 0; i < ignoreRegexes.length; i++) {
-        const regex = ignoreRegexes[i]
-        const match = regex.exec(l)
-        if (match) {
-            console.log('filtered: ', match[0])
-            return ""
-        };
-    }
-    return l;
-
+module.exports.main = async function () {
+  const _bundle = await bundle(process.env.ROOT_CONTRACT)
+  await fs.writeFile('./contracts/bundle/Bundle.sol', _bundle, (s) => null)
 }
-
-
-parseFile('/home/robbe/Desktop/rarity-nft/contracts/Collectible.sol')
-    .then((v) => fs.writeFile("Bundle.sol", v, () => console.log('done')))
-    .catch((err) => console.log(err))
