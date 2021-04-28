@@ -25,3 +25,6 @@ contains_string
 	werkende & niet werkende case
 contains_int
 	werkende & niet-werkende case
+
+
+deployed contract: 0x8CF940fc6166db0cD429064F6A689749Ade2A378
