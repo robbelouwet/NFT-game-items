@@ -1,31 +1,32 @@
 //SPDX-License-Identifier: MIT
-pragma solidity >= 0.6.0 <0.8.0;
+pragma solidity >=0.6.0 <0.8.0;
 
 library CollectibleUtils {
-
-    struct Item {
+    struct Tier {
         string name;
 
-        uint supply_id; // signifies exatcly which item out of all the copies this is
-        uint item_id; // should be the same as its blueprint's item_id
-        uint tier_id; // aka mask exponent
-    }
+        // this should be 0 or at least as small as possible
+        // if you set this to 10 for example, you wan't create masks with rarity < 10
+        // Also, this acts like a 'label', this doesn't really hold a value,
+        uint modulo_target;
 
-    struct Tier {
-        uint id;
+        // this should be unique with every tier, acts like an unique ID
+        // cannot be 0
+        uint rarity;
 
         // this basically tells how big the buffer should be so that it can hold all the id's of the blueprints of this tier
         // in other words, 2^n-1 needs to be smaller than ItemBlueprint[].length of this tier, see mapping tier_blueprints
-        uint item_buffer_size; // amount of bits
-        string name; // Diamond or smth
         string[] blueprint_names;
     }
 
     struct ItemBlueprint {
-        // buffer size that that holds enough for the max_supply
-        // in other words, 2^supply_buffer_size - 1 > max_supply
-        uint supply_buffer_size;
-        uint max_supply; // n = size of the buffer, => amount of copies that can exist (max suppl = 2^n-1)
-        string name; // "Sword" or smth
+        // How many NFT tokens of this blueprint that should be available
+        uint max_supply;
+        string name;
     }
+
+    // amount of bits that makes up the default buffer size
+    // for holding things like the max supply of a blueprint, max amount
+    // of blueprints in a tier
+    uint public constant default_buffer_size = 32;
 }

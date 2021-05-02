@@ -28,3 +28,10 @@ contains_int
 
 
 deployed contract: 0x8CF940fc6166db0cD429064F6A689749Ade2A378
+
+
+TODO
+* modulo system, how though
+* fixed buffer sizes
+* CR*UD* tiers & blueprints
+* True randomness by future blockhashes (in combination with storing a seed)

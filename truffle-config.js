@@ -2,7 +2,7 @@ require('dotenv').config()
 const HDWalletProvider = require('@truffle/hdwallet-provider')
 
 module.exports = {
-  contracts_directory: './contracts/bundle/',
+  contracts_directory: './contracts/src/',
   networks: {
     ropsten: {
       provider: (_) =>
@@ -30,8 +30,7 @@ module.exports = {
       // dus localhost waar ganache runt op p 7545
       host: '127.0.0.1',
       port: 7545,
-      network_id: '*', // Match any network id
-      websockets: true,
+      network_id: '5777', // Match any network id
     },
   },
   compilers: {

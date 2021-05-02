@@ -1,74 +1,98 @@
 /* Copyright (c) 2019 The47 */
 
 //SPDX-License-Identifier: MIT
-pragma solidity >= 0.6.0 <0.8.0;
+pragma solidity >=0.7.0 <0.8.0;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {CollectibleUtils as ut} from "./utils.sol";
 
 contract Collectible is ERC721 {
-
     // contract owner
     address owner;
 
-    event newOwner(address indexed from, address to);
-
-    // tier_id => Tier
+    // Keep a mapping of all the tiers by their rarity
+    // We also need to store the tier_names and their unique rarity values to quickly iterate
+    // over existing tiers.
     mapping(uint => ut.Tier) tiers;
-    uint[] tier_ids; // [2, 3, ...], means tiers with mask [11, 111, ...]
+    uint[] tier_rarities;
     string[] tier_names;
 
-    // contains all mined items in circulation.
-    // trailing mask bits of the key (item_id) signify the tier
-    //
-    // item_id => Item
-    mapping(uint => ut.Item) items;
-
-    // tier_id => ItemBlueprint[]
+    // For every tier rarity, store that tier's blueprints as well
     mapping(uint => ut.ItemBlueprint[]) tier_blueprints;
 
     // all parameters necessary to validate ownership of an item id against the owner's provided challenge string etc.
-    event minedSuccessfully(address indexed user, string challenge, uint blocknumber, uint tier_blueprints_buffer_size, uint tier_blueprints, uint blueprint_max_supply);
+    event minedSuccessfully(
+        address indexed user,
+        string challenge,
+        uint blocknumber,
+        string tier_name,
+        string blueprint_name,
+        uint rarity
+    );
     event challengeFailed(address indexed user, string message);
+    event newOwner(address indexed from, address to);
 
     modifier isOwner() {
         require(msg.sender == owner);
         _;
     }
 
-    constructor() ERC721("Collectible", "CLB"){
+    constructor() public ERC721("Collectible", "CLB") {
         owner = msg.sender;
     }
 
     /**
      * @param challenge is the challenge string, basically a random input of arbitrary length
      */
-    function mine(string memory challenge) public payable {
-        // the combined input to hash. Should be challenge string and latest block hash
-        bytes memory input = abi.encodePacked(challenge/*,blockhash(block.number-1)*/); // blockhash commented out for testing
+    function loot(string memory challenge) public payable {
+        // the combined input to hash. Should be challenge string and latest block hash and timestamp
+        bytes memory input =
+            abi.encodePacked(challenge, blockhash(block.number - 1)); // blockhash commented out for testing
 
         // hash of the challenge input
         bytes32 hashed_challenge = keccak256(input);
 
+        uint int_hash;
+        assembly {
+            int_hash := shr(0, hashed_challenge)
+        }
+
+        mine(int_hash);
+    }
+
+    // Wer split up loot() from mine() so we can test easier
+    function mine(uint challenge) public isOwner {
+        bytes32 hashed_challenge;
+        assembly {
+            hashed_challenge := shr(0, challenge)
+        }
+
         // detect if we match a tier, and which one
-        uint tier_id = find_present_tier(hashed_challenge); // returns mask_bits
-        if (tier_id == 0x0) {
-            emit challengeFailed(msg.sender, "Did not crack the challenge with the specified challenge string.");
+        uint tier_rarity = find_present_tier(hashed_challenge); // returns mask_bits
+        if (tier_rarity == 0) {
+            emit challengeFailed(
+                msg.sender,
+                "Did not crack the challenge with the specified challenge string."
+            );
             return;
         }
 
         // we know the tier, now figure out which blueprint they mined
-        uint blueprint_id = which_tier_blueprint(hashed_challenge, tier_id);
+        uint blueprint_id =
+            which_tier_blueprint(hashed_challenge, tier_rarity);
 
         // we know which blueprint, now which exact blueprint instance (aka which blueprint instance id) did they mine?
-        uint item_id = item_id(hashed_challenge, tier_id, blueprint_id); 
+        uint item_id = item_id(hashed_challenge, tier_rarity, blueprint_id);
 
         if (_exists(item_id)) {
-            emit challengeFailed(msg.sender, "Mined successfully, but item already exists.");
+            emit challengeFailed(
+                msg.sender,
+                "Mined successfully, but item already exists."
+            );
             return;
         }
 
-        mint(tier_id, blueprint_id, item_id, msg.sender);
+        _safeMint(msg.sender, item_id);
 
         // emit an event with all necessary information to validate that this user did in fact mine this item_id
         // in other words, validate ownership of this user with the token minted and placed in items mapping (see Collectible.sol)
@@ -76,204 +100,233 @@ contract Collectible is ERC721 {
         // you can re-hash the challenge with block hash and derive the blueprint_id, tier_id and blueprint instance id that matches the token
         emit minedSuccessfully(
             msg.sender,
-            challenge,
+            "appel",
             block.number,
-            getTierBPBufferSize(tier_id),
-            getTierItemsCount(tier_id),
-            getBlueprintMaxSupply(tier_id, blueprint_id)
+            tiers[tier_rarity].name,
+            tier_blueprints[tiers[tier_rarity].rarity][blueprint_id].name,
+            100 // TODO
         );
     }
 
     /**
      * Returns the global unique ID of the mined item, whether or not it already exists.
      */
-    function item_id(bytes32 _hash, uint tier_id, uint blueprint_id) private returns (uint){
-        uint blueprint_supply = getBlueprintMaxSupply(tier_id, blueprint_id);
-        uint tier_items_buff_size = getTierBPBufferSize(tier_id);
+    function item_id(
+        bytes32 _hash,
+        uint tier_rarity,
+        uint blueprint_id
+    ) private view returns (uint) {
+        // how many instances hould exist of this blueprint?
+        uint blueprint_supply =
+            get_blueprint_max_supply(tier_rarity, blueprint_id);
+        uint buff_size = ut.default_buffer_size;
 
-        // shift the tier mask off memory
-        uint shift_tier_mask;
-        bytes32 bshift_tier_mask;
+        // Now we want to shift the tier's buffer and blueprint's buffer off memory
+        uint shifted_hash;
         assembly {
-            shift_tier_mask := shr(tier_id, _hash)
-            bshift_tier_mask := shr(tier_id, _hash)
+            shifted_hash := shr(buff_size, _hash)
+            shifted_hash := shr(buff_size, shifted_hash)
         }
 
-        // now shift the blueprint id buffer off memory
-        uint shift_bp_id_buffer;
-        bytes32 bshift_bp_id_buffer;
-        assembly{
-            shift_bp_id_buffer := shr(tier_items_buff_size, shift_tier_mask)
-            bshift_bp_id_buffer := shr(tier_items_buff_size, shift_tier_mask)
-        }
-
-        // now what remains are random bits of the hash, the least significant bits represent the blueprint instance id
+        // now what remains are random bits of the hash which represent the blueprint's instance id
         // so modulo with the blueprint's max supply and we have our id
-        uint id = (shift_bp_id_buffer) % blueprint_supply;
+        uint id = shifted_hash % blueprint_supply;
 
-        // now we have the tier mask, the blueprint id and the blueprint's instance id
-        // concatenate them all to form the ultimate item_id
-        uint tier_mask = 2**tier_id-1;
+        // now we have the tier, the blueprint id and the blueprint's instance id
+        // concatenate them all to form the ultimate item_id or NFT token
         assembly {
-            id := shl(tier_items_buff_size, id)
+            id := shl(buff_size, id)
             id := add(id, blueprint_id)
-            id := shl(tier_id, id)
-            id := add(id, tier_mask)
+            id := shl(buff_size, id)
+            id := add(id, tier_rarity)
         }
 
         return id;
     }
 
     /**
-     * find out if the hash covers one of the tier masks, if so, return the tier name string.
+     * Find out if we got lucky and match a tier
+     * If we did, extract the tier with the highest rarity in case we match multiple tiers.
+     *
+     * @return rarest_tier the rarity of the rarest tier that we found in the hash, 0 if there was no tier.
      */
-    function find_present_tier(bytes32 _hash) public view returns (uint longest_mask){
-        uint[] memory mask_exps = getMasks();
-        longest_mask = 0;
-        for (uint256 index = 0; index < mask_exps.length; index++) {
-            uint mask = 2**mask_exps[index]-1;
-            uint offset = 256 - mask_exps[index];
-            bytes32 xored = check_mask(_hash, mask, offset);
+    function find_present_tier(bytes32 _hash)
+        public
+        view
+        returns (uint)
+    {
+        uint[] memory rarities = get_tier_rarities();
+        uint rarest_tier;
+        for (uint i = 0; i < rarities.length; i++) {
+            ut.Tier memory tier = tiers[rarities[i]];
+            uint r = rarities[i];
 
-            // we don't only want to find a match, we also want the biggest mask that fits
-            if (xored == 0x0 && mask_exps[index] > longest_mask) longest_mask = mask_exps[index];
+            bytes32 hash_tier_buffer;
+            uint offset = 256-ut.default_buffer_size;
+            assembly {
+                hash_tier_buffer := shl(offset, _hash)
+                hash_tier_buffer := shr(offset, hash_tier_buffer)
+            }
+
+            uint b_hash_tier_buffer;
+            assembly{b_hash_tier_buffer := shr(0, hash_tier_buffer)}
+
+            require(r != 0, "Cannot perform modulo 0.");
+            uint modulo = b_hash_tier_buffer % r;
+            if (modulo == tier.modulo_target) {
+                // if this is the first match, or we match with a tier with higher rarity,
+                // then set this new tier as the rarest one
+                if (rarest_tier == 0 || tier.rarity > rarest_tier) {
+                    rarest_tier = tier.rarity;
+                }
+            }
         }
+
+        return rarest_tier;
     }
 
-    /**
-    This function looks at which blueprint_id is present in the specified hash and tier
-     */
-    // remeber, item_id INCLUDES the tier's mask
-    function which_tier_blueprint(bytes32 _hash, uint tier) private returns (uint){
-        uint size = getTierItemsCount(tier); // returns 0-based length
+    function which_tier_blueprint(bytes32 _hash, uint tier_rarity)
+        private
+        view
+        returns (uint)
+    {
+        uint size = get_tier_items_count(tier_rarity); // returns 0-based length
+        uint buffer_size = ut.default_buffer_size;
+
+        // 1 buffer was for tier, and 1 holding the blueprint_id, keep thos 2 buffers on memory
+        uint left_offset = 256 - 2 * buffer_size;
+
+        // then shift tier off memory
+        uint right_offset = buffer_size;
 
         // convert the hash to an int, and shift the mask bits outside the buffer
-        uint _hash_int;
-        assembly {_hash_int := shr(tier, _hash)}
+        uint sliced_hash;
+        assembly {
+            sliced_hash := shl(left_offset, _hash)
+            sliced_hash := shr(left_offset, sliced_hash)
+            sliced_hash := shr(right_offset, sliced_hash)
+        }
 
         // if we now calculate the hash % amount_items, we should result in a random, existing, item_id
-        return _hash_int % size;
-    }
-
-    // check if we have a match
-    // if we do, by shifting the mask all the way to the start of the reserved 32 byte memory (and shift the hash by the same offset)
-    // if we xor those 2 and we result in 0, then the target mask matches the last x bits of the hashed_challenge, and the sender has 'won'
-    function check_mask(bytes32 _hash, uint mask, uint mask_length) private pure returns (bytes32 xored) {
-        assembly{
-            let x := shl(mask_length, _hash)
-            let y := shl(mask_length, mask)
-            xored := xor(x, y)
-        }
-    }
-
-    function getItemName(uint blueprint_id, uint tier_id) public view returns (string memory) {
-        require(tiers[tier_id].id != 0, "This tier doesn't exist!");
-        require(tier_blueprints[tier_id].length >= blueprint_id, "There is no such blueprint in this tier!");
-
-        return tier_blueprints[tier_id][blueprint_id].name;
+        return sliced_hash % size;
     }
 
     /**
      * the total oods will be 1 out of 2^(exponent) - 1
      * so if exponent is 3, the total odds of mining this tier is 2^3 - 1 = 1 out of 7
      */
-    function newTier(string memory tier, uint exponent, uint buffer_size) public isOwner {
-        addTier(tier, exponent, buffer_size);
+    function new_tier(
+        string memory name,
+        uint modulo_target,
+        uint rarity
+    ) public isOwner {
+        add_tier(name, modulo_target, rarity);
     }
 
-    function getTierBPBufferSize(uint tier_id) public view returns(uint) {
-        require(tier_blueprints[tier_id].length != 0, "Tier doesn't exist!");
-        return tiers[tier_id].item_buffer_size;
+    function add_tier(
+        string memory name,
+        uint modulo_target,
+        uint rarity
+    ) private returns (uint) {
+        require(rarity != 0, "A rarity value for a tier cannot be 0.");
+        require(tiers[rarity].rarity == 0, "This tier exists.");
+        require(
+            contains_int(tier_rarities, rarity) == false,
+            "This is already a known rarity value"
+        );
+        require(
+            contains_string(tier_names, name) == false,
+            "A tier with this name already exists"
+        );
+
+        ut.Tier memory tier;
+        tier.name = name;
+        tier.modulo_target = modulo_target;
+        tier.rarity = rarity;
+
+        tiers[rarity] = tier;
+        tier_rarities.push(rarity);
+        tier_names.push(name);
+
+        return rarity;
     }
 
-    function addTier(string memory tier, uint id, uint buffer_size) private returns (uint) {
-        require(id >0 && id < 256, "Please specify a number between 0 and 256");
-        require(tiers[id].id == 0, "This tier exists and already has a mask.");
-        require(contains_int(tier_ids, id) == false, "This is already a known rarity value");
-        require(contains_string(tier_names, tier) == false, "A tier with this name already exists");
+    function add_tier_blueprint(
+        uint tier_rarity,
+        string memory name,
+        uint max_supply
+    ) public isOwner {
+        require(
+            tiers[tier_rarity].rarity != 0,
+            "Adding BluePrint to nonexist, uint supply_buffer_size, ent tier!"
+        );
+        require(
+            contains_string(tiers[tier_rarity].blueprint_names, name) == false,
+            "A Blueprint with this name already exists in this tier!"
+        );
 
-        ut.Tier memory new_tier;
-        new_tier.name = tier;
-        new_tier.id = id;
-        new_tier.item_buffer_size = buffer_size;
-
-        tiers[id] = new_tier;
-        tier_ids.push(id);
-        tier_names.push(tier);
-
-        return id;
+        ut.ItemBlueprint memory bp = ut.ItemBlueprint(max_supply, name);
+        tiers[tier_rarity].blueprint_names.push(name);
+        tier_blueprints[tier_rarity].push(bp);
     }
 
-    function addTierBlueprint(uint tier_id, uint max_supply, uint supply_buffer_size, string memory name) public isOwner{
-        require(tiers[tier_id].id != 0, "Adding BluePrint to nonexistent tier!");
-        require(2**supply_buffer_size-1 >= max_supply, "Buffer size too small, it must be able to hold *max_supply* id's");
-        require(contains_string(tiers[tier_id].blueprint_names, name) == false, "A Blueprint with this name already exists in this tier!");
-        uint n = tiers[tier_id].item_buffer_size;
-        if (2**n-1 <= tier_blueprints[tier_id].length){
-            // if we reach the max items that the buffer of this tier can hold, increment buffer size
-            tiers[tier_id].item_buffer_size = tiers[tier_id].item_buffer_size + 1;
-        }
-        ut.ItemBlueprint memory bp = ut.ItemBlueprint(supply_buffer_size, max_supply, name);
-        tiers[tier_id].blueprint_names.push(name);
-        tier_blueprints[tier_id].push(bp);
+    function get_blueprint_max_supply(uint tier_rarity, uint blueprint_id)
+        public
+        view
+        returns (uint)
+    {
+        require(tiers[tier_rarity].rarity != 0, "Tier doesn't exist!");
+        require(
+            tier_blueprints[tier_rarity].length > blueprint_id,
+            "Blueprint ID doesn't exist!"
+        );
+        return tier_blueprints[tier_rarity][blueprint_id].max_supply;
     }
 
-    function getBlueprintMaxSupply(uint tier_id, uint blueprint_id) public view returns (uint) {        
-        require(tiers[tier_id].id != 0, "Tier doesn't exist!");
-        require(tier_blueprints[tier_id].length > blueprint_id, "Blueprint ID doesn't exist!");
-        return tier_blueprints[tier_id][blueprint_id].max_supply;
+    function get_tier_items_count(uint tier_rarity)
+        public
+        view
+        returns (uint)
+    {
+        require(tiers[tier_rarity].rarity != 0, "This tier doesn't exist!");
+        require(tiers[tier_rarity].rarity == tier_rarity, "Something went wrong, tier not indexed by its rarity.");
+        uint size =  tier_blueprints[tier_rarity].length;
+        require(size != 0, "This tier doesn't have any items!");
+        return size;
     }
 
-    function getTierItemsCount(uint tier_id) public view returns (uint){
-        require(tiers[tier_id].id != 0, "This tier doesn't exist!");
-        return tier_blueprints[tier_id].length;
+    function get_tier_rarities() public view returns (uint[] memory) {
+        return tier_rarities;
     }
 
-    function getTierBufferSize(uint tier_id) public view returns(uint) {
-        require(tiers[tier_id].id != 0, "Tier doesn't exist!");
-        return tiers[tier_id].item_buffer_size;
-    }
-
-    function getMasks() public view returns (uint[] memory) {
-        return tier_ids;
-    }
-
-    function mint(uint tier_id, uint blueprint_id, uint id, address to) public isOwner {
-        uint tier_items_buff_size = getTierBPBufferSize(tier_id);
-        uint instance_id;
-        assembly {
-            instance_id := shr(tier_id, id)
-            instance_id := shr(tier_items_buff_size, id)
-        }
-
-        ut.ItemBlueprint memory bp = tier_blueprints[tier_id][blueprint_id];
-        ut.Item memory minted = ut.Item(bp.name, instance_id, blueprint_id, tier_id);
-        
-        // mint token for winner
-        _safeMint(to, id);
-
-        // add newly minted token to circulation
-        // mint before saving item, successfully minting represents a guaranteed ownership
-        items[id] = minted;
-    }
-
-    function transferOwnership(address to) public isOwner {
+    function transfer_ownership(address to) public isOwner {
         owner = to;
         emit newOwner(msg.sender, owner);
     }
 
-    function contains_string(string[] storage array, string memory target) private view returns(bool) {
-        for (uint256 index = 0; index < array.length; index++) {
-            if (keccak256(abi.encodePacked(array[index])) == keccak256(abi.encodePacked(target))) {
+    function contains_string(string[] storage array, string memory target)
+        private
+        view
+        returns (bool)
+    {
+        for (uint index = 0; index < array.length; index++) {
+            if (
+                keccak256(abi.encodePacked(array[index])) ==
+                keccak256(abi.encodePacked(target))
+            ) {
                 return true;
             }
         }
         return false;
     }
 
-    function contains_int(uint[] storage array, uint target) private view returns(bool) {
+    function contains_int(uint[] storage array, uint target)
+        private
+        view
+        returns (bool)
+    {
         bool found;
-        for (uint256 index = 0; index < array.length; index++) {
+        for (uint index = 0; index < array.length; index++) {
             if (array[index] == target) {
                 found = true;
                 break;
