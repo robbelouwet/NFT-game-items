@@ -6,7 +6,7 @@ pragma solidity >=0.7.0 <0.8.0;
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {CollectibleUtils as ut} from "./utils.sol";
 
-contract Collectible is ERC721 {
+contract LootBox is ERC721 {
     // contract owner
     address _owner;
 
