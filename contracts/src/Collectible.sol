@@ -1,6 +1,6 @@
 /* Copyright (c) 2019 The47 */
 
-//SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.7.0 <0.8.0;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
@@ -10,24 +10,28 @@ contract Collectible is ERC721 {
     // contract owner
     address owner;
 
+    uint256 ticket_price; // in wei!
+
+    mapping(address => ut.Ticket[]) registry;
+
     // Keep a mapping of all the tiers by their rarity
     // We also need to store the tier_names and their unique rarity values to quickly iterate
     // over existing tiers.
-    mapping(uint => ut.Tier) tiers;
-    uint[] tier_rarities;
+    mapping(uint256 => ut.Tier) tiers;
+    uint256[] tier_rarities;
     string[] tier_names;
 
     // For every tier rarity, store that tier's blueprints as well
-    mapping(uint => ut.ItemBlueprint[]) tier_blueprints;
+    mapping(uint256 => ut.ItemBlueprint[]) tier_blueprints;
 
     // all parameters necessary to validate ownership of an item id against the owner's provided challenge string etc.
     event minedSuccessfully(
         address indexed user,
         string challenge,
-        uint blocknumber,
+        uint256 blocknumber,
         string tier_name,
         string blueprint_name,
-        uint rarity
+        uint256 rarity
     );
     event challengeFailed(address indexed user, string message);
     event newOwner(address indexed from, address to);
@@ -37,14 +41,14 @@ contract Collectible is ERC721 {
         _;
     }
 
-    constructor() public ERC721("Collectible", "CLB") {
+    constructor(uint256 _ticket_price) public ERC721("Collectible", "CLB") {
         owner = msg.sender;
+        ticket_price = _ticket_price;
     }
 
-    /**
-     * @param challenge is the challenge string, basically a random input of arbitrary length
-     */
-    function loot(string memory challenge) public payable {
+    function loot() public payable {
+        bytes32 challenge = pop_ticket(msg.sender);
+
         // the combined input to hash. Should be challenge string and latest block hash and timestamp
         bytes memory input =
             abi.encodePacked(challenge, blockhash(block.number - 1)); // blockhash commented out for testing
@@ -52,7 +56,7 @@ contract Collectible is ERC721 {
         // hash of the challenge input
         bytes32 hashed_challenge = keccak256(input);
 
-        uint int_hash;
+        uint256 int_hash;
         assembly {
             int_hash := shr(0, hashed_challenge)
         }
@@ -61,14 +65,14 @@ contract Collectible is ERC721 {
     }
 
     // Wer split up loot() from mine() so we can test easier
-    function mine(uint challenge) public isOwner {
+    function mine(uint256 challenge) public isOwner {
         bytes32 hashed_challenge;
         assembly {
             hashed_challenge := shr(0, challenge)
         }
 
         // detect if we match a tier, and which one
-        uint tier_rarity = find_present_tier(hashed_challenge); // returns mask_bits
+        uint256 tier_rarity = find_present_tier(hashed_challenge); // returns mask_bits
         if (tier_rarity == 0) {
             emit challengeFailed(
                 msg.sender,
@@ -78,11 +82,11 @@ contract Collectible is ERC721 {
         }
 
         // we know the tier, now figure out which blueprint they mined
-        uint blueprint_id =
+        uint256 blueprint_id =
             which_tier_blueprint(hashed_challenge, tier_rarity);
 
         // we know which blueprint, now which exact blueprint instance (aka which blueprint instance id) did they mine?
-        uint item_id = item_id(hashed_challenge, tier_rarity, blueprint_id);
+        uint256 item_id = item_id(hashed_challenge, tier_rarity, blueprint_id);
 
         if (_exists(item_id)) {
             emit challengeFailed(
@@ -113,16 +117,16 @@ contract Collectible is ERC721 {
      */
     function item_id(
         bytes32 _hash,
-        uint tier_rarity,
-        uint blueprint_id
-    ) private view returns (uint) {
+        uint256 tier_rarity,
+        uint256 blueprint_id
+    ) private view returns (uint256) {
         // how many instances hould exist of this blueprint?
-        uint blueprint_supply =
+        uint256 blueprint_supply =
             get_blueprint_max_supply(tier_rarity, blueprint_id);
-        uint buff_size = ut.default_buffer_size;
+        uint256 buff_size = ut.default_buffer_size;
 
         // Now we want to shift the tier's buffer and blueprint's buffer off memory
-        uint shifted_hash;
+        uint256 shifted_hash;
         assembly {
             shifted_hash := shr(buff_size, _hash)
             shifted_hash := shr(buff_size, shifted_hash)
@@ -130,7 +134,7 @@ contract Collectible is ERC721 {
 
         // now what remains are random bits of the hash which represent the blueprint's instance id
         // so modulo with the blueprint's max supply and we have our id
-        uint id = shifted_hash % blueprint_supply;
+        uint256 id = shifted_hash % blueprint_supply;
 
         // now we have the tier, the blueprint id and the blueprint's instance id
         // concatenate them all to form the ultimate item_id or NFT token
@@ -150,29 +154,27 @@ contract Collectible is ERC721 {
      *
      * @return rarest_tier the rarity of the rarest tier that we found in the hash, 0 if there was no tier.
      */
-    function find_present_tier(bytes32 _hash)
-        public
-        view
-        returns (uint)
-    {
-        uint[] memory rarities = get_tier_rarities();
-        uint rarest_tier;
-        for (uint i = 0; i < rarities.length; i++) {
+    function find_present_tier(bytes32 _hash) public view returns (uint256) {
+        uint256[] memory rarities = get_tier_rarities();
+        uint256 rarest_tier;
+        for (uint256 i = 0; i < rarities.length; i++) {
             ut.Tier memory tier = tiers[rarities[i]];
-            uint r = rarities[i];
+            uint256 r = rarities[i];
 
             bytes32 hash_tier_buffer;
-            uint offset = 256-ut.default_buffer_size;
+            uint256 offset = 256 - ut.default_buffer_size;
             assembly {
                 hash_tier_buffer := shl(offset, _hash)
                 hash_tier_buffer := shr(offset, hash_tier_buffer)
             }
 
-            uint b_hash_tier_buffer;
-            assembly{b_hash_tier_buffer := shr(0, hash_tier_buffer)}
+            uint256 b_hash_tier_buffer;
+            assembly {
+                b_hash_tier_buffer := shr(0, hash_tier_buffer)
+            }
 
             require(r != 0, "Cannot perform modulo 0.");
-            uint modulo = b_hash_tier_buffer % r;
+            uint256 modulo = b_hash_tier_buffer % r;
             if (modulo == tier.modulo_target) {
                 // if this is the first match, or we match with a tier with higher rarity,
                 // then set this new tier as the rarest one
@@ -185,22 +187,22 @@ contract Collectible is ERC721 {
         return rarest_tier;
     }
 
-    function which_tier_blueprint(bytes32 _hash, uint tier_rarity)
+    function which_tier_blueprint(bytes32 _hash, uint256 tier_rarity)
         private
         view
-        returns (uint)
+        returns (uint256)
     {
-        uint size = get_tier_items_count(tier_rarity); // returns 0-based length
-        uint buffer_size = ut.default_buffer_size;
+        uint256 size = get_tier_items_count(tier_rarity); // returns 0-based length
+        uint256 buffer_size = ut.default_buffer_size;
 
         // 1 buffer was for tier, and 1 holding the blueprint_id, keep thos 2 buffers on memory
-        uint left_offset = 256 - 2 * buffer_size;
+        uint256 left_offset = 256 - 2 * buffer_size;
 
         // then shift tier off memory
-        uint right_offset = buffer_size;
+        uint256 right_offset = buffer_size;
 
         // convert the hash to an int, and shift the mask bits outside the buffer
-        uint sliced_hash;
+        uint256 sliced_hash;
         assembly {
             sliced_hash := shl(left_offset, _hash)
             sliced_hash := shr(left_offset, sliced_hash)
@@ -217,17 +219,17 @@ contract Collectible is ERC721 {
      */
     function new_tier(
         string memory name,
-        uint modulo_target,
-        uint rarity
+        uint256 modulo_target,
+        uint256 rarity
     ) public isOwner {
         add_tier(name, modulo_target, rarity);
     }
 
     function add_tier(
         string memory name,
-        uint modulo_target,
-        uint rarity
-    ) private returns (uint) {
+        uint256 modulo_target,
+        uint256 rarity
+    ) private returns (uint256) {
         require(rarity != 0, "A rarity value for a tier cannot be 0.");
         require(tiers[rarity].rarity == 0, "This tier exists.");
         require(
@@ -252,9 +254,9 @@ contract Collectible is ERC721 {
     }
 
     function add_tier_blueprint(
-        uint tier_rarity,
+        uint256 tier_rarity,
         string memory name,
-        uint max_supply
+        uint256 max_supply
     ) public isOwner {
         require(
             tiers[tier_rarity].rarity != 0,
@@ -270,10 +272,10 @@ contract Collectible is ERC721 {
         tier_blueprints[tier_rarity].push(bp);
     }
 
-    function get_blueprint_max_supply(uint tier_rarity, uint blueprint_id)
+    function get_blueprint_max_supply(uint256 tier_rarity, uint256 blueprint_id)
         public
         view
-        returns (uint)
+        returns (uint256)
     {
         require(tiers[tier_rarity].rarity != 0, "Tier doesn't exist!");
         require(
@@ -283,19 +285,22 @@ contract Collectible is ERC721 {
         return tier_blueprints[tier_rarity][blueprint_id].max_supply;
     }
 
-    function get_tier_items_count(uint tier_rarity)
+    function get_tier_items_count(uint256 tier_rarity)
         public
         view
-        returns (uint)
+        returns (uint256)
     {
         require(tiers[tier_rarity].rarity != 0, "This tier doesn't exist!");
-        require(tiers[tier_rarity].rarity == tier_rarity, "Something went wrong, tier not indexed by its rarity.");
-        uint size =  tier_blueprints[tier_rarity].length;
+        require(
+            tiers[tier_rarity].rarity == tier_rarity,
+            "Something went wrong, tier not indexed by its rarity."
+        );
+        uint256 size = tier_blueprints[tier_rarity].length;
         require(size != 0, "This tier doesn't have any items!");
         return size;
     }
 
-    function get_tier_rarities() public view returns (uint[] memory) {
+    function get_tier_rarities() public view returns (uint256[] memory) {
         return tier_rarities;
     }
 
@@ -304,12 +309,53 @@ contract Collectible is ERC721 {
         emit newOwner(msg.sender, owner);
     }
 
+    function buy_ticket(string memory seed, uint256 amount) public payable {
+        require(amount > 0, "specify an amount greater than 0.");
+        if (amount * ticket_price > msg.value) {
+            revert("Didn't send enough ether");
+        }
+
+        uint256 remainder = msg.value - (amount * ticket_price);
+
+        bytes32 latest_seed = keccak256(abi.encodePacked(seed));
+        for (uint256 i = 0; i < amount; i++) {
+            ut.Ticket memory t = ut.Ticket(block.number + 1, latest_seed);
+            registry[msg.sender].push(t);
+            latest_seed = keccak256(abi.encodePacked(seed));
+        }
+
+        msg.sender.transfer(remainder);
+    }
+
+    function pop_ticket(address adr)
+        public isOwner
+        returns (bytes32 entropy)
+    {
+        ut.Ticket[] memory arr = registry[adr];
+
+        // require(arr.length > 0 && arr[arr.length-1].block_number != 0,
+        // "address doesn't have any tickets."
+        // );
+
+        ut.Ticket memory t = arr[arr.length - 1];
+
+        entropy = keccak256(
+            abi.encodePacked(t.personal_seed, blockhash(t.block_number))
+        );
+
+        registry[adr].pop();
+    }
+
+    function get_ticket_price() public view returns (uint256) {
+        return ticket_price;
+    }
+
     function contains_string(string[] storage array, string memory target)
         private
         view
         returns (bool)
     {
-        for (uint index = 0; index < array.length; index++) {
+        for (uint256 index = 0; index < array.length; index++) {
             if (
                 keccak256(abi.encodePacked(array[index])) ==
                 keccak256(abi.encodePacked(target))
@@ -320,13 +366,13 @@ contract Collectible is ERC721 {
         return false;
     }
 
-    function contains_int(uint[] storage array, uint target)
+    function contains_int(uint256[] storage array, uint256 target)
         private
         view
         returns (bool)
     {
         bool found;
-        for (uint index = 0; index < array.length; index++) {
+        for (uint256 index = 0; index < array.length; index++) {
             if (array[index] == target) {
                 found = true;
                 break;

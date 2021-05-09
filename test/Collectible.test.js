@@ -1,8 +1,10 @@
 const { assert } = require('chai')
-const web3 = require('web3')
-const toBN = require('web3').utils.toBN
 
 const Collectible = artifacts.require('Collectible')
+require('dotenv').config()
+const Web3 = require('web3')
+const web3 = new Web3(`http://localhost:7545`)
+const toBN = require('web3').utils.toBN
 
 let tryCatch = require('../utils/exceptions.js').tryCatch
 let errTypes = require('../utils/exceptions.js').errTypes
@@ -11,13 +13,13 @@ let generateInput = require('../utils/parseTransaction').generateInput
 let bundle = require('../bundle').main
 
 require('chai').use(require('chai-as-promised')).should()
+// await web3.eth.sendTransaction({to: accounts[0],from: accounts[6],value: web3.utils.toBN('99000000000000000000')})
 
 /**
  * To test these tests, remove the blocknumber from the keccak256 call when hashing the challenge string in mine()
  */
-contract('Collectible', () => {
+contract('Collectible', (accounts) => {
   let collectible
-
   //   describe('Bundling', async () => {
   //     it('Bundle root contract successfully', async () => {
   //       await bundle()
@@ -53,6 +55,20 @@ contract('Collectible', () => {
       await collectible.add_tier_blueprint(2, 'Axe', 5)
     })
 
+    it('Add "Common" items', async () => {
+      // parameters: rarity of the tier, name, max instances (max supply)
+      await collectible.add_tier_blueprint(5, 'Sword', 5)
+      await collectible.add_tier_blueprint(5, 'Pickaxe', 5)
+      await collectible.add_tier_blueprint(5, 'Axe', 5)
+    })
+
+    it('Add "Uncommon" items', async () => {
+      // parameters: rarity of the tier, name, max instances (max supply)
+      await collectible.add_tier_blueprint(20, 'Sword', 5)
+      await collectible.add_tier_blueprint(20, 'Pickaxe', 5)
+      await collectible.add_tier_blueprint(20, 'Axe', 5)
+    })
+
     it('Add "Legendary" blueprints', async () => {
       // parameters: rarity of the tier, name, max instances (max supply)
       await collectible.add_tier_blueprint(50, 'Flaming Sword', 10)
@@ -80,7 +96,7 @@ contract('Collectible', () => {
       const input = generateInput(4, 2, 1)
       // we mine the same tier, but a different item (both challenges result in a hash ending with a 7)
       const _tx = await collectible.mine(input)
-      assert.isTrue(eventPresent('minedSuccessfully', _tx));
+      assert.isTrue(eventPresent('minedSuccessfully', _tx))
     })
 
     it('Mine another "normal" item, different blueprint => minedSuccessfully', async () => {
@@ -94,7 +110,7 @@ contract('Collectible', () => {
       const input = generateInput(4, 1, 2)
       // we mine the same tier, but a different item (both challenges result in a hash ending with a 7)
       const _tx = await collectible.mine(input)
-      console.log(_tx.tx)
+      //console.log(_tx.tx)
       assert.isTrue(eventPresent('minedSuccessfully', _tx))
     })
 
@@ -188,4 +204,94 @@ contract('Collectible', () => {
   // describe('Integration tests', () => {
   // 	it('Mine & Transfer ')
   // })
+
+  describe('Buy ticket', async () => {
+    it('Buy 1 tickets and receive change back.', async () => {
+      const amount = 1
+      const balance_before = await web3.eth.getBalance(collectible.address)
+
+      const tx = await collectible.buy_ticket.sendTransaction('appel', amount, {
+        from: accounts[0],
+        value: toBN('5000000000000000000'), // 2 ETH, should receive 1 back,
+      })
+
+      const balance_after = await web3.eth.getBalance(collectible.address)
+      const ticket_price = await collectible.get_ticket_price()
+      assert.equal(
+        parseInt(balance_after),
+        parseInt(balance_before) + amount * parseInt(ticket_price),
+      )
+    })
+
+    it('Pop the only ticket we have', async () => {
+      //await Promise.resolve(() => setTimeout(5000))
+      const tx = await collectible.pop_ticket(accounts[0])
+    })
+
+    it("Pop a ticket we don't have", async () => {
+      //await Promise.resolve(() => setTimeout(5000))
+      await tryCatch(collectible.pop_ticket(accounts[0]), errTypes.revert)
+    })
+
+    it('Buy 2 tickets and receive change back.', async () => {
+      const amount = 2
+      const balance_before = await web3.eth.getBalance(collectible.address)
+
+      const tx = await collectible.buy_ticket.sendTransaction('appel', amount, {
+        from: accounts[0],
+        value: toBN('500000000000000000'), // 2 ETH, should receive 1 back,
+      })
+
+      const balance_after = await web3.eth.getBalance(collectible.address)
+      const ticket_price = await collectible.get_ticket_price()
+      assert.equal(
+        parseInt(balance_after),
+        parseInt(balance_before) + amount * parseInt(ticket_price),
+      )
+    })
+
+    it('Buy 2 tickets with insufficient funds', async () => {
+      const amount = 2
+      const tx = async () =>
+        await collectible.buy_ticket.sendTransaction('appel', amount, {
+          from: accounts[0],
+          value: toBN('100000000000000000'),
+        })
+
+      await tryCatch(tx(), errTypes.revert)
+    })
+  })
+
+  describe('Looting', async () => {
+    it('First, buy 2 tickets', async () => {
+      const _tx = await collectible.buy_ticket('appel', 2, {
+        from: accounts[0],
+        value: toBN('500000000000000000'),
+      })
+    })
+
+    it('Loot first time', async () => {
+      const _tx = await collectible.loot({
+        from: accounts[0],
+      })
+      console.log('Loot 1: ', _tx.tx)
+    })
+
+    it('Loot second time', async () => {
+      const _tx = await collectible.loot({
+        from: accounts[0],
+      })
+      console.log('Loot 2: ', _tx.tx)
+    })
+
+    it('Loot third time, only 2 tickets => fails', async () => {
+      // await tryCatch(
+        const _tx = await collectible.loot({
+          from: accounts[0],
+        })//,
+        // errTypes.revert,
+      // )
+      console.log('Fail loot 3: ', _tx.tx)
+    })
+  })
 })
