@@ -8,21 +8,23 @@ import {CollectibleUtils as ut} from "./utils.sol";
 
 contract Collectible is ERC721 {
     // contract owner
-    address owner;
+    address _owner;
 
-    uint256 ticket_price; // in wei!
+    // How much should rolling 1 box cost? (in wei!)
+    uint256 _ticket_price;
 
-    mapping(address => ut.Ticket[]) registry;
+    // The ticket registry, players consume a ticket when rolling a box.
+    // looting is free, tickets are what players actually buy.
+    mapping(address => ut.Ticket[]) _registry;
 
-    // Keep a mapping of all the tiers by their rarity
-    // We also need to store the tier_names and their unique rarity values to quickly iterate
-    // over existing tiers.
-    mapping(uint256 => ut.Tier) tiers;
-    uint256[] tier_rarities;
-    string[] tier_names;
+    // Keep a mapping of all the tiers by their rarity, rarity acts like an UID for every tier.
+    // We also need to store the tier names adn ID's seperately to easily check for duplicate tiers.
+    mapping(uint256 => ut.Tier) _tiers;
+    uint256[] _tier_rarities;
+    string[] _tier_names;
 
-    // For every tier rarity, store that tier's blueprints as well
-    mapping(uint256 => ut.ItemBlueprint[]) tier_blueprints;
+    // For every tier rarity, store that tier's blueprints.
+    mapping(uint256 => ut.ItemBlueprint[]) _tier_blueprints;
 
     // all parameters necessary to validate ownership of an item id against the owner's provided challenge string etc.
     event minedSuccessfully(
@@ -37,17 +39,23 @@ contract Collectible is ERC721 {
     event newOwner(address indexed from, address to);
 
     modifier isOwner() {
-        require(msg.sender == owner);
+        require(msg.sender == _owner);
         _;
     }
 
-    constructor(uint256 _ticket_price) public ERC721("Collectible", "CLB") {
-        owner = msg.sender;
-        ticket_price = _ticket_price;
+    constructor(uint ticket_price) public ERC721("Collectible", "CLB") {
+        _owner = msg.sender;
+        _ticket_price = ticket_price;
     }
 
-    function loot() public payable {
-        bytes32 challenge = pop_ticket(msg.sender);
+    /**
+     * This is the entrypoint for users that have >= 1 tickets, and want to roll a lootbox.
+     * First, the last ticket of the user is popped, if it exists. 
+     * This returns a random bytes32 hash, this represents the lootbox. The rest of the code
+     * is just checking what the user has won.
+     */
+    function loot() public {
+        bytes32 challenge = popTicket(msg.sender);
 
         // the combined input to hash. Should be challenge string and latest block hash and timestamp
         bytes memory input =
@@ -64,7 +72,10 @@ contract Collectible is ERC721 {
         mine(int_hash);
     }
 
-    // Wer split up loot() from mine() so we can test easier
+    /**
+     * This function is called by loot().
+     * Checks whether the sender has won something.
+     */
     function mine(uint256 challenge) public isOwner {
         bytes32 hashed_challenge;
         assembly {
@@ -72,7 +83,7 @@ contract Collectible is ERC721 {
         }
 
         // detect if we match a tier, and which one
-        uint256 tier_rarity = find_present_tier(hashed_challenge); // returns mask_bits
+        uint256 tier_rarity = findPresentTier(hashed_challenge); // returns mask_bits
         if (tier_rarity == 0) {
             emit challengeFailed(
                 msg.sender,
@@ -83,12 +94,12 @@ contract Collectible is ERC721 {
 
         // we know the tier, now figure out which blueprint they mined
         uint256 blueprint_id =
-            which_tier_blueprint(hashed_challenge, tier_rarity);
+            findPresentBlueprint(hashed_challenge, tier_rarity);
 
         // we know which blueprint, now which exact blueprint instance (aka which blueprint instance id) did they mine?
-        uint256 item_id = item_id(hashed_challenge, tier_rarity, blueprint_id);
+        uint256 constructItemID = constructItemID(hashed_challenge, tier_rarity, blueprint_id);
 
-        if (_exists(item_id)) {
+        if (_exists(constructItemID)) {
             emit challengeFailed(
                 msg.sender,
                 "Mined successfully, but item already exists."
@@ -96,9 +107,9 @@ contract Collectible is ERC721 {
             return;
         }
 
-        _safeMint(msg.sender, item_id);
+        _safeMint(msg.sender, constructItemID);
 
-        // emit an event with all necessary information to validate that this user did in fact mine this item_id
+        // emit an event with all necessary information to validate that this user did in fact mine this constructItemID
         // in other words, validate ownership of this user with the token minted and placed in items mapping (see Collectible.sol)
         //
         // you can re-hash the challenge with block hash and derive the blueprint_id, tier_id and blueprint instance id that matches the token
@@ -106,59 +117,69 @@ contract Collectible is ERC721 {
             msg.sender,
             "appel",
             block.number,
-            tiers[tier_rarity].name,
-            tier_blueprints[tiers[tier_rarity].rarity][blueprint_id].name,
+            _tiers[tier_rarity].name,
+            _tier_blueprints[_tiers[tier_rarity].rarity][blueprint_id].name,
             100 // TODO
         );
     }
 
     /**
-     * Returns the global unique ID of the mined item, whether or not it already exists.
+     * Buys a ticket. Whenever a ticket is bought, that ticket grabs block.number+1 and stores it.
+     * Whenever this ticket is popped, the hash of that blocknumber is calculated. This is the actual source of randomness.
+     * It lies in predicting future blockhashes (which is impossible).
      */
-    function item_id(
-        bytes32 _hash,
-        uint256 tier_rarity,
-        uint256 blueprint_id
-    ) private view returns (uint256) {
-        // how many instances hould exist of this blueprint?
-        uint256 blueprint_supply =
-            get_blueprint_max_supply(tier_rarity, blueprint_id);
-        uint256 buff_size = ut.default_buffer_size;
-
-        // Now we want to shift the tier's buffer and blueprint's buffer off memory
-        uint256 shifted_hash;
-        assembly {
-            shifted_hash := shr(buff_size, _hash)
-            shifted_hash := shr(buff_size, shifted_hash)
+    function buyTicket(string memory _seed, uint256 amount) public payable {
+        require(amount > 0, "specify an amount greater than 0.");
+        if (amount * _ticket_price > msg.value) {
+            revert("Didn't send enough wei");
         }
 
-        // now what remains are random bits of the hash which represent the blueprint's instance id
-        // so modulo with the blueprint's max supply and we have our id
-        uint256 id = shifted_hash % blueprint_supply;
+        uint256 remainder = msg.value - (amount * _ticket_price);
 
-        // now we have the tier, the blueprint id and the blueprint's instance id
-        // concatenate them all to form the ultimate item_id or NFT token
-        assembly {
-            id := shl(buff_size, id)
-            id := add(id, blueprint_id)
-            id := shl(buff_size, id)
-            id := add(id, tier_rarity)
+        bytes32 seed = keccak256(abi.encodePacked(_seed));
+        for (uint256 i = 0; i < amount; i++) {
+            _registry[msg.sender].push(ut.Ticket(block.number + 1, seed));
+
+            bytes32 latest_seed = keccak256(abi.encodePacked(seed));
+            assembly {seed := shr(0, latest_seed)}
         }
 
-        return id;
+        msg.sender.transfer(remainder);
     }
 
     /**
-     * Find out if we got lucky and match a tier
-     * If we did, extract the tier with the highest rarity in case we match multiple tiers.
-     *
-     * @return rarest_tier the rarity of the rarest tier that we found in the hash, 0 if there was no tier.
+     * Pops the last ticket from the array of tickets of the address. In other words,
+     * the random seed is calculated (see buyTicket()), then the ticket is removed
+     * and the random seed is returned.
      */
-    function find_present_tier(bytes32 _hash) public view returns (uint256) {
-        uint256[] memory rarities = get_tier_rarities();
+    function popTicket(address adr)
+        public isOwner
+        returns (bytes32 seed)
+    {
+        ut.Ticket[] memory arr = _registry[adr];
+
+        require(arr.length > 0 && arr[arr.length-1].block_number != 0,
+        "address doesn't have any tickets."
+        );
+
+        ut.Ticket memory t = arr[arr.length - 1];
+
+        seed = keccak256(
+            abi.encodePacked(t.personal_seed, blockhash(t.block_number))
+        );
+
+        _registry[adr].pop();
+    }
+
+    /**
+     * This method checks which tier the bytes32 hash challenge aka lootbox covers.
+     * If none is found, it returns 0.
+     */
+    function findPresentTier(bytes32 _hash) public view returns (uint256) {
+        uint256[] memory rarities = getTierRarities();
         uint256 rarest_tier;
         for (uint256 i = 0; i < rarities.length; i++) {
-            ut.Tier memory tier = tiers[rarities[i]];
+            ut.Tier memory tier = _tiers[rarities[i]];
             uint256 r = rarities[i];
 
             bytes32 hash_tier_buffer;
@@ -187,12 +208,17 @@ contract Collectible is ERC721 {
         return rarest_tier;
     }
 
-    function which_tier_blueprint(bytes32 _hash, uint256 tier_rarity)
+    /**
+     * Like findpresentTier, but with blueprint.
+     * Only difference is: if a tier was present, we already know the challenge hash contains an item.
+     * In other words, we know for certain this method will return a blueprint.
+     */
+    function findPresentBlueprint(bytes32 _hash, uint256 tier_rarity)
         private
         view
         returns (uint256)
     {
-        uint256 size = get_tier_items_count(tier_rarity); // returns 0-based length
+        uint256 size = getTierBlueprintCount(tier_rarity); // returns 0-based length
         uint256 buffer_size = ut.default_buffer_size;
 
         // 1 buffer was for tier, and 1 holding the blueprint_id, keep thos 2 buffers on memory
@@ -209,35 +235,72 @@ contract Collectible is ERC721 {
             sliced_hash := shr(right_offset, sliced_hash)
         }
 
-        // if we now calculate the hash % amount_items, we should result in a random, existing, item_id
+        // if we now calculate the hash % amount_items, we should result in a random, existing, constructItemID
         return sliced_hash % size;
     }
 
     /**
-     * the total oods will be 1 out of 2^(exponent) - 1
-     * so if exponent is 3, the total odds of mining this tier is 2^3 - 1 = 1 out of 7
+     * When a tier and blueprint are found in the challenge hash, we can construct an item ID.
+     * It is basically a concatenation of the tier rarity, blueprint id, and blueprint's supply identifier.
+     * The blueprint supply identifier is the 3rd and last piece of information we need to extract from the challenge hash.
+     * THe concatenation of these 3 results in a unique ID that represents this specific item.
+     * It's also the NFT that will be minted to the sender IF the item ID doesn't already exist.
      */
-    function new_tier(
-        string memory name,
-        uint256 modulo_target,
-        uint256 rarity
-    ) public isOwner {
-        add_tier(name, modulo_target, rarity);
+    function constructItemID(
+        bytes32 _hash,
+        uint256 tier_rarity,
+        uint256 blueprint_id
+    ) private view returns (uint256) {
+        // how many instances hould exist of this blueprint?
+        uint256 blueprint_supply =
+            getBlueprintMaxSupply(tier_rarity, blueprint_id);
+        uint256 buff_size = ut.default_buffer_size;
+
+        // Now we want to shift the tier's buffer and blueprint's buffer off memory
+        uint256 shifted_hash;
+        assembly {
+            shifted_hash := shr(buff_size, _hash)
+            shifted_hash := shr(buff_size, shifted_hash)
+        }
+
+        // now what remains are random bits of the hash which represent the blueprint's instance id
+        // so modulo with the blueprint's max supply and we have our id
+        uint256 id = shifted_hash % blueprint_supply;
+
+        // now we have the tier, the blueprint id and the blueprint's instance id
+        // concatenate them all to form the ultimate constructItemID or NFT token
+        assembly {
+            id := shl(buff_size, id)
+            id := add(id, blueprint_id)
+            id := shl(buff_size, id)
+            id := add(id, tier_rarity)
+        }
+
+        return id;
     }
 
-    function add_tier(
+    /**
+     * Creates a new tier.
+     * @param name The name of the new tier, e.g.: "Exotic"
+     * @param modulo_target Some number smaller than the rarity. Essentialy, the modulo of the challenge against the rarity
+     *                      will be calculated. If it matches this modulo_target, the player has successfully looted this tier.
+     * @param rarity How rare do you want this tier to be? E.g.: 50 will have odds of 1/50 for looting this tier.
+     *               This is not the total odds someone has of looting an exact specific item, this also depends on whether
+     *               or not that item already exists
+     */
+    function addTier(
         string memory name,
         uint256 modulo_target,
         uint256 rarity
-    ) private returns (uint256) {
+    ) public isOwner returns (uint256) {
         require(rarity != 0, "A rarity value for a tier cannot be 0.");
-        require(tiers[rarity].rarity == 0, "This tier exists.");
+        require(_tiers[rarity].rarity == 0, "This tier exists.");
         require(
-            contains_int(tier_rarities, rarity) == false,
+            containsInt(_tier_rarities, rarity) == false,
             "This is already a known rarity value"
         );
         require(
-            contains_string(tier_names, name) == false,
+            containsString(_tier_names, name) == false,
             "A tier with this name already exists"
         );
 
@@ -246,111 +309,97 @@ contract Collectible is ERC721 {
         tier.modulo_target = modulo_target;
         tier.rarity = rarity;
 
-        tiers[rarity] = tier;
-        tier_rarities.push(rarity);
-        tier_names.push(name);
+        _tiers[rarity] = tier;
+        _tier_rarities.push(rarity);
+        _tier_names.push(name);
 
         return rarity;
     }
 
-    function add_tier_blueprint(
+    /**
+    * Adds a blueprint to the specified tier.
+    *
+    * @param tier_rarity (= tier ID) The tier you want to add this blueprint to.
+    * @param name Name of this blueprint, e.g. "Sword".
+    * @param max_supply The max amount of item ID's that can be generated fom this blueprint.
+    */
+    function addBlueprint(
         uint256 tier_rarity,
         string memory name,
         uint256 max_supply
     ) public isOwner {
         require(
-            tiers[tier_rarity].rarity != 0,
+            _tiers[tier_rarity].rarity != 0,
             "Adding BluePrint to nonexist, uint supply_buffer_size, ent tier!"
         );
         require(
-            contains_string(tiers[tier_rarity].blueprint_names, name) == false,
+            containsString(_tiers[tier_rarity].blueprint_names, name) == false,
             "A Blueprint with this name already exists in this tier!"
         );
 
         ut.ItemBlueprint memory bp = ut.ItemBlueprint(max_supply, name);
-        tiers[tier_rarity].blueprint_names.push(name);
-        tier_blueprints[tier_rarity].push(bp);
+        _tiers[tier_rarity].blueprint_names.push(name);
+        _tier_blueprints[tier_rarity].push(bp);
     }
 
-    function get_blueprint_max_supply(uint256 tier_rarity, uint256 blueprint_id)
+    /**
+    * Get the max supply of the specified blueprint of the specified tier.
+    * Remember, tier_rarity acts like the tier_id.
+    */
+    function getBlueprintMaxSupply(uint256 tier_rarity, uint256 blueprint_id)
         public
         view
         returns (uint256)
     {
-        require(tiers[tier_rarity].rarity != 0, "Tier doesn't exist!");
+        require(_tiers[tier_rarity].rarity != 0, "Tier doesn't exist!");
         require(
-            tier_blueprints[tier_rarity].length > blueprint_id,
+            _tier_blueprints[tier_rarity].length > blueprint_id,
             "Blueprint ID doesn't exist!"
         );
-        return tier_blueprints[tier_rarity][blueprint_id].max_supply;
+        return _tier_blueprints[tier_rarity][blueprint_id].max_supply;
     }
 
-    function get_tier_items_count(uint256 tier_rarity)
+    /**
+    * Get the amount of blueprints in the specified tier.
+    */
+    function getTierBlueprintCount(uint256 tier_rarity)
         public
         view
         returns (uint256)
     {
-        require(tiers[tier_rarity].rarity != 0, "This tier doesn't exist!");
+        require(_tiers[tier_rarity].rarity != 0, "This tier doesn't exist!");
         require(
-            tiers[tier_rarity].rarity == tier_rarity,
+            _tiers[tier_rarity].rarity == tier_rarity,
             "Something went wrong, tier not indexed by its rarity."
         );
-        uint256 size = tier_blueprints[tier_rarity].length;
-        require(size != 0, "This tier doesn't have any items!");
+        uint256 size = _tier_blueprints[tier_rarity].length;
+        require(size != 0, "This tier doesn't have any blueprints!");
         return size;
     }
 
-    function get_tier_rarities() public view returns (uint256[] memory) {
-        return tier_rarities;
+    /**
+    * List the rarities of all the tiers.
+    */
+    function getTierRarities() public view returns (uint256[] memory) {
+        return _tier_rarities;
     }
 
-    function transfer_ownership(address to) public isOwner {
-        owner = to;
-        emit newOwner(msg.sender, owner);
+    /**
+     * Transfer to new owner.
+     */
+    function transferOwnership(address to) public isOwner {
+        _owner = to;
+        emit newOwner(msg.sender, _owner);
     }
 
-    function buy_ticket(string memory seed, uint256 amount) public payable {
-        require(amount > 0, "specify an amount greater than 0.");
-        if (amount * ticket_price > msg.value) {
-            revert("Didn't send enough ether");
-        }
-
-        uint256 remainder = msg.value - (amount * ticket_price);
-
-        bytes32 latest_seed = keccak256(abi.encodePacked(seed));
-        for (uint256 i = 0; i < amount; i++) {
-            ut.Ticket memory t = ut.Ticket(block.number + 1, latest_seed);
-            registry[msg.sender].push(t);
-            latest_seed = keccak256(abi.encodePacked(seed));
-        }
-
-        msg.sender.transfer(remainder);
+    /**
+     * Query the price of 1 ticket (in wei!)
+     */
+    function getTicketPrice() public view returns (uint256) {
+        return _ticket_price;
     }
 
-    function pop_ticket(address adr)
-        public isOwner
-        returns (bytes32 entropy)
-    {
-        ut.Ticket[] memory arr = registry[adr];
-
-        // require(arr.length > 0 && arr[arr.length-1].block_number != 0,
-        // "address doesn't have any tickets."
-        // );
-
-        ut.Ticket memory t = arr[arr.length - 1];
-
-        entropy = keccak256(
-            abi.encodePacked(t.personal_seed, blockhash(t.block_number))
-        );
-
-        registry[adr].pop();
-    }
-
-    function get_ticket_price() public view returns (uint256) {
-        return ticket_price;
-    }
-
-    function contains_string(string[] storage array, string memory target)
+    function containsString(string[] storage array, string memory target)
         private
         view
         returns (bool)
@@ -366,7 +415,7 @@ contract Collectible is ERC721 {
         return false;
     }
 
-    function contains_int(uint256[] storage array, uint256 target)
+    function containsInt(uint256[] storage array, uint256 target)
         private
         view
         returns (bool)
