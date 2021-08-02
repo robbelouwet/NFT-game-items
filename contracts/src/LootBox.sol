@@ -73,6 +73,19 @@ contract LootBox is ERC721 {
     }
 
     /**
+     * This method is used to bulk add multiple tiers
+     * this takes in a 2 dimensional stringified array-like structure
+     * example: "Exotic;0;256|legendary;0;128"
+     */
+    //function bulkAddTiers(string memory paramString) public isOwner {
+    //    //name, modulo_target, rarity
+    //    for (uint256 i = 0; i < array.length; i++) {
+    //        
+    //    }
+    //    addTier();
+    //}
+
+    /**
      * This function is called by loot().
      * Checks whether the sender has won something.
      */
