@@ -13,7 +13,10 @@ let generateInput = require("../utils/parseTransaction").generateInput;
 
 require("chai").use(require("chai-as-promised")).should();
 
-contract("Collectible", (accounts) => {
+/*
+Inteded for testing on Ganache only
+*/
+contract("Lootbox", (accounts) => {
 	let lootbox;
 
 	describe("Deployment", async () => {

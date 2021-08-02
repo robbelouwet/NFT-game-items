@@ -1,4 +1,4 @@
-## Collectible
+## Lootbox
 transfer distributor
 toevoegen van tiers
 x 	success scenario

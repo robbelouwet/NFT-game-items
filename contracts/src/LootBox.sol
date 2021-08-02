@@ -4,7 +4,7 @@
 pragma solidity >=0.7.0 <0.8.0;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import {CollectibleUtils as ut} from "./utils.sol";
+import {LootboxUtils as ut} from "./utils.sol";
 
 contract LootBox is ERC721 {
     // contract owner
@@ -123,7 +123,7 @@ contract LootBox is ERC721 {
         _safeMint(msg.sender, constructItemID);
 
         // emit an event with all necessary information to validate that this user did in fact mine this constructItemID
-        // in other words, validate ownership of this user with the token minted and placed in items mapping (see Collectible.sol)
+        // in other words, validate ownership of this user with the token minted and placed in items mapping (see Lootbox.sol)
         //
         // you can re-hash the challenge with block hash and derive the blueprint_id, tier_id and blueprint instance id that matches the token
         emit minedSuccessfully(

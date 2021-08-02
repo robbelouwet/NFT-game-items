@@ -1,7 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity >=0.6.0 <0.8.0;
 
-library CollectibleUtils {
+library LootboxUtils {
     struct Tier {
         string name;
         // this should be 0 or at least as small as possible
