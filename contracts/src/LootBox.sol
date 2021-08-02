@@ -43,7 +43,7 @@ contract LootBox is ERC721 {
         _;
     }
 
-    constructor(uint ticket_price) public ERC721("Collectible", "CLB") {
+    constructor(uint ticket_price) public ERC721("Lootbox", "LBX") {
         _owner = msg.sender;
         _ticket_price = ticket_price;
     }

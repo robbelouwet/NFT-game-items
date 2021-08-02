@@ -1,0 +1,27 @@
+   Deploying 'LootBox'
+   -------------------
+   > transaction hash:    0x837111325fcd1785c0c21b1043ce189727cd56c709b13398fdaae06abb7ed514
+   > Blocks: 2            Seconds: 16
+   > contract address:    0x58D30A3AfB82A1E7De103955186cB7fA0Ea561F1
+   > block number:        10757795
+   > block timestamp:     1627904331
+   > account:             0xCB66704acDdD683FBb9E7aB62bF2b18947f187F0
+   > balance:             10.837577
+   > gas used:            4403408 (0x4330d0)
+   > gas price:           20 gwei
+   > value sent:          0 ETH
+   > total cost:          0.08806816 ETH
+
+   Pausing for 2 confirmations...
+   ------------------------------
+   > confirmation number: 1 (block: 10757796)
+   > confirmation number: 2 (block: 10757797)
+   > Saving artifacts
+   -------------------------------------
+   > Total cost:          0.08806816 ETH
+
+
+Summary
+=======
+> Total deployments:   1
+> Final cost:          0.08806816 ETH
