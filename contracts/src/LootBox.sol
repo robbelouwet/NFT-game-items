@@ -58,8 +58,9 @@ contract LootBox is ERC721 {
         bytes32 challenge = popTicket(msg.sender);
 
         // the combined input to hash. Should be challenge string and latest block hash and timestamp
+        // TODO: just taking the last hash isn't secure, we need to take the hash of a specific block, chosen when the user bought his/her ticket
         bytes memory input =
-            abi.encodePacked(challenge, blockhash(block.number - 1)); // blockhash commented out for testing
+            abi.encodePacked(challenge, blockhash(block.number - 1));
 
         // hash of the challenge input
         bytes32 hashed_challenge = keccak256(input);
